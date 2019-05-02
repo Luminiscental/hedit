@@ -157,8 +157,6 @@ handleEvent vty editState = do
     EvKey KEnter [] -> return (False, pushEdit '\n' editState)
     EvKey KBS [] -> return (False, popEdit editState)
     EvKey (KChar '\t') [] -> return (False, pushEdits "    " editState)
-    EvKey (KChar 't') [] ->
-      return (False, pushEdits (show . nextLine $ editState) editState)
     EvKey (KChar c) [] -> return (False, pushEdit c editState)
     _ -> return (False, editState)
 
