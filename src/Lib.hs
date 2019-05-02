@@ -50,13 +50,13 @@ row = subtract 1 . length . stableLines . beforeCursor
 column :: EditState -> Int
 column = (fromMaybe <$> length <*> findIndex (== '\n')) . beforeCursor
 
-nextLineLength :: EditState -> Maybe Int
-nextLineLength editState = do
+nextLine :: EditState -> Maybe (Int, Int)
+nextLine editState = do
   let after = afterCursor editState
       indices = findIndices (== '\n') after
-  startIdx <- (indices ^? element 0)
-  let endIdx = fromMaybe (length after - startIdx) $ indices ^? element 1
-  return (endIdx - startIdx - 1)
+  preIdx <- (indices ^? element 0)
+  let endIdx = fromMaybe (length after - preIdx) $ indices ^? element 1
+  return (preIdx + 1, endIdx)
 
 showPos :: EditState -> String
 showPos editState = combineToString <$> row <*> column $ editState
@@ -103,12 +103,11 @@ moveDown editState@EditState {beforeCursor = bs, afterCursor = as} =
   let col = column editState
       offset =
         fromMaybe 0 $ do
-          idx <- findIndex (== '\n') as
-          nextLength <- nextLineLength editState
+          (startIdx, endIdx) <- nextLine editState
           return $
-            if col < nextLength
-              then idx + col + 1
-              else idx + nextLength + 1
+            if col <= endIdx - startIdx
+              then startIdx + col
+              else endIdx
       (skipped, left) = splitAt offset as
    in EditState {beforeCursor = reverse skipped ++ bs, afterCursor = left}
 
@@ -158,6 +157,8 @@ handleEvent vty editState = do
     EvKey KEnter [] -> return (False, pushEdit '\n' editState)
     EvKey KBS [] -> return (False, popEdit editState)
     EvKey (KChar '\t') [] -> return (False, pushEdits "    " editState)
+    EvKey (KChar 't') [] ->
+      return (False, pushEdits (show . nextLine $ editState) editState)
     EvKey (KChar c) [] -> return (False, pushEdit c editState)
     _ -> return (False, editState)
 
