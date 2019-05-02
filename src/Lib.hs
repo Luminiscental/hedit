@@ -126,10 +126,17 @@ pushEdit :: Char -> EditState -> EditState
 pushEdit c EditState {beforeCursor = bs, afterCursor = as} =
   EditState {beforeCursor = c : bs, afterCursor = as}
 
+pushEdits :: String -> EditState -> EditState
+pushEdits str editState = foldl (flip pushEdit) editState str
+
 popEdit :: EditState -> EditState
 popEdit EditState {beforeCursor = b:bs, afterCursor = as} =
   EditState {beforeCursor = bs, afterCursor = as}
 popEdit s = s
+
+popEdits :: Int -> EditState -> EditState
+popEdits 0 editState = editState
+popEdits n editState = popEdits (n - 1) $ popEdit editState
 
 -- IO Functions
 start :: IO ()
@@ -157,7 +164,7 @@ handleEvent vty editState = do
     EvKey KUp [] -> return (False, moveUp editState)
     EvKey KEnter [] -> return (False, pushEdit '\n' editState)
     EvKey KBS [] -> return (False, popEdit editState)
-    EvKey (KChar '\t') [] -> return (False, editState)
+    EvKey (KChar '\t') [] -> return (False, pushEdits "    " editState)
     EvKey (KChar c) [] -> return (False, pushEdit c editState)
     _ -> return (False, editState)
 
