@@ -44,6 +44,9 @@ emptyEditState :: EditState
 emptyEditState = EditState {beforeCursor = "", afterCursor = ""}
 
 -- EditState properties
+text :: EditState -> String
+text EditState {beforeCursor = b, afterCursor = a} = reverse b ++ a
+
 row :: EditState -> Int
 row = subtract 1 . length . stableLines . beforeCursor
 
@@ -55,7 +58,7 @@ nextLine editState = do
   let after = afterCursor editState
       indices = findIndices (== '\n') after
   preIdx <- (indices ^? element 0)
-  let endIdx = fromMaybe (length after - preIdx) $ indices ^? element 1
+  let endIdx = fromMaybe (length after) $ indices ^? element 1
   return (preIdx + 1, endIdx)
 
 showPos :: EditState -> String
