@@ -9,10 +9,7 @@ import Graphics.Vty
 
 -- Pure utility functions
 stableLines :: String -> [String]
-stableLines str =
-  let appended = str ++ "%"
-      appendedLines = lines appended
-   in init appendedLines ++ [init (last appendedLines)]
+stableLines = ((++) <$> init <*> (: []) . init . last) . lines . (++ "%")
 
 stableUnlines :: [String] -> String
 stableUnlines = foldl1 (\acc line -> acc ++ '\n' : line)
