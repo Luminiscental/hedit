@@ -9,14 +9,13 @@ import Graphics.Vty
 
 -- Pure utility functions
 stableLines :: String -> [String]
-stableLines "" = [""]
 stableLines str =
   let appended = str ++ "%"
       appendedLines = lines appended
    in init appendedLines ++ [init (last appendedLines)]
 
 stableUnlines :: [String] -> String
-stableUnlines strs = foldl1 (\acc line -> acc ++ '\n' : line) strs
+stableUnlines = foldl1 (\acc line -> acc ++ '\n' : line)
 
 -- Vty utility functions
 textAttr :: Attr
@@ -32,8 +31,7 @@ textToImg :: String -> Image
 textToImg = string textAttr . intersperse ' '
 
 strToImgs :: String -> [Image]
-strToImgs "" = [emptyImage]
-strToImgs s = map textToImg . stableLines $ s
+strToImgs = map textToImg . stableLines
 
 stackImgs :: [Image] -> Image
 stackImgs = foldl (<->) emptyImage
@@ -50,12 +48,10 @@ emptyEditState = EditState {beforeCursor = "", afterCursor = ""}
 
 -- EditState properties
 row :: EditState -> Int
-row EditState {beforeCursor = bs, afterCursor = _} =
-  (length . stableLines $ bs) - 1
+row = subtract 1 . length . stableLines . beforeCursor
 
 column :: EditState -> Int
-column EditState {beforeCursor = bs, afterCursor = _} =
-  fromMaybe <$> length <*> findIndex (== '\n') $ bs
+column = (fromMaybe <$> length <*> findIndex (== '\n')) . beforeCursor
 
 nextLineLength :: EditState -> Maybe Int
 nextLineLength editState = do
