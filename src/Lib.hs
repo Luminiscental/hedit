@@ -85,11 +85,6 @@ stackImgs :: [Image] -> Image
 stackImgs = foldl (<->) emptyImage
 
 renderEditState :: EditState -> Image
-renderEditState EditState {beforeCursor = '\n':bs, afterCursor = as} =
-  let imgsBefore = strToImgs $ reverse bs
-      imgsAfter = strToImgs as
-      middleImage = emptyImage <-> cursorImg <|> head imgsAfter
-   in stackImgs [stackImgs imgsBefore, middleImage, stackImgs (tail imgsAfter)]
 renderEditState editState =
   let imgsBefore = strToImgs $ reverse . beforeCursor $ editState
       imgsAfter = strToImgs . afterCursor $ editState
