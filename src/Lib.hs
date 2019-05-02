@@ -26,7 +26,7 @@ cursorImg :: Image
 cursorImg = string cursorAttr "|"
 
 textToImg :: String -> Image
-textToImg = string textAttr . intersperse ' '
+textToImg = string textAttr
 
 strToImgs :: String -> [Image]
 strToImgs = map textToImg . stableLines
@@ -45,8 +45,8 @@ emptyEditState :: EditState
 emptyEditState = EditState { beforeCursor = "", afterCursor = "" }
 
 -- EditState properties
-text :: EditState -> String
-text EditState { beforeCursor = b, afterCursor = a } = reverse b ++ a
+getText :: EditState -> String
+getText EditState { beforeCursor = b, afterCursor = a } = reverse b ++ a
 
 row :: EditState -> Int
 row = subtract 1 . length . stableLines . beforeCursor
@@ -66,15 +66,8 @@ showPos :: EditState -> String
 showPos = combineToString <$> row <*> column
     where combineToString row col = show row ++ ":" ++ show col
 
-renderEditState :: EditState -> Image
-renderEditState editState =
-    let
-        imgsBefore = strToImgs $ reverse . beforeCursor $ editState
-        imgsAfter  = strToImgs . afterCursor $ editState
-        imgMiddle  = last imgsBefore <|> cursorImg <|> head imgsAfter
-    in
-        stackImgs
-            [stackImgs (init imgsBefore), imgMiddle, stackImgs (tail imgsAfter)]
+renderText :: EditState -> Image
+renderText = stackImgs . strToImgs . getText
 
 -- EditState mutations
 flipAroundCursor :: EditState -> EditState
@@ -160,5 +153,9 @@ handleEvent vty editState = do
 
 render :: Vty -> EditState -> IO ()
 render vty editState = do
-    let pic = picForImage $ renderEditState editState
+    let img    = renderText editState
+    let r      = row editState
+    let c      = column editState
+    let cursor = Cursor c r
+    let pic    = Picture cursor [img] ClearBackground
     update vty pic
