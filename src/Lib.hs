@@ -1,11 +1,12 @@
 module Lib
-  ( start
-  ) where
+    ( start
+    )
+where
 
-import Control.Lens
-import Data.List
-import Data.Maybe
-import Graphics.Vty
+import           Control.Lens
+import           Data.List
+import           Data.Maybe
+import           Graphics.Vty
 
 -- Pure utility functions
 stableLines :: String -> [String]
@@ -41,92 +42,88 @@ data EditState = EditState
 
 -- EditState constructors
 emptyEditState :: EditState
-emptyEditState = EditState {beforeCursor = "", afterCursor = ""}
+emptyEditState = EditState { beforeCursor = "", afterCursor = "" }
 
 -- EditState properties
 text :: EditState -> String
-text EditState {beforeCursor = b, afterCursor = a} = reverse b ++ a
+text EditState { beforeCursor = b, afterCursor = a } = reverse b ++ a
 
 row :: EditState -> Int
 row = subtract 1 . length . stableLines . beforeCursor
 
 column :: EditState -> Int
-column = (fromMaybe <$> length <*> findIndex (== '\n')) . beforeCursor
+column = (fromMaybe <$> length <*> elemIndex '\n') . beforeCursor
 
 nextLine :: EditState -> Maybe (Int, Int)
 nextLine editState = do
-  let after = afterCursor editState
-      indices = findIndices (== '\n') after
-  preIdx <- (indices ^? element 0)
-  let endIdx = fromMaybe (length after) $ indices ^? element 1
-  return (preIdx + 1, endIdx)
+    let after   = afterCursor editState
+        indices = elemIndices '\n' after
+    preIdx <- indices ^? element 0
+    let endIdx = fromMaybe (length after) $ indices ^? element 1
+    return (preIdx + 1, endIdx)
 
 showPos :: EditState -> String
-showPos editState = combineToString <$> row <*> column $ editState
-  where
-    combineToString row col = show row ++ ":" ++ show col
+showPos = combineToString <$> row <*> column
+    where combineToString row col = show row ++ ":" ++ show col
 
 renderEditState :: EditState -> Image
 renderEditState editState =
-  let imgsBefore = strToImgs $ reverse . beforeCursor $ editState
-      imgsAfter = strToImgs . afterCursor $ editState
-      imgMiddle = last imgsBefore <|> cursorImg <|> head imgsAfter
-   in stackImgs
-        [stackImgs (init imgsBefore), imgMiddle, stackImgs (tail imgsAfter)]
+    let
+        imgsBefore = strToImgs $ reverse . beforeCursor $ editState
+        imgsAfter  = strToImgs . afterCursor $ editState
+        imgMiddle  = last imgsBefore <|> cursorImg <|> head imgsAfter
+    in
+        stackImgs
+            [stackImgs (init imgsBefore), imgMiddle, stackImgs (tail imgsAfter)]
 
 -- EditState mutations
 flipAroundCursor :: EditState -> EditState
-flipAroundCursor EditState {beforeCursor = bs, afterCursor = as} =
-  EditState {beforeCursor = as, afterCursor = bs}
+flipAroundCursor EditState { beforeCursor = bs, afterCursor = as } =
+    EditState { beforeCursor = as, afterCursor = bs }
 
 flipAroundRow :: EditState -> EditState
 flipAroundRow editState =
-  let beforeLines = stableLines . beforeCursor $ editState
-      afterLines = stableLines . afterCursor $ editState
-      flipped ls = map reverse $ tail ls
-      flippedToAfter = flipped beforeLines
-      flippedToBefore = flipped afterLines
-      stillBefore = head beforeLines
-      stillAfter = head afterLines
-   in EditState
-        { beforeCursor = stableUnlines $ [stillBefore] ++ flippedToBefore
-        , afterCursor = stableUnlines $ [stillAfter] ++ flippedToAfter
-        }
+    let beforeLines = stableLines . beforeCursor $ editState
+        afterLines  = stableLines . afterCursor $ editState
+        flipped ls = map reverse $ tail ls
+        flippedToAfter  = flipped beforeLines
+        flippedToBefore = flipped afterLines
+        stillBefore     = head beforeLines
+        stillAfter      = head afterLines
+    in  EditState { beforeCursor = stableUnlines $ stillBefore : flippedToBefore
+                  , afterCursor  = stableUnlines $ stillAfter : flippedToAfter
+                  }
 
 moveRight :: EditState -> EditState
-moveRight EditState {beforeCursor = bs, afterCursor = a:as} =
-  EditState {beforeCursor = a : bs, afterCursor = as}
+moveRight EditState { beforeCursor = bs, afterCursor = a : as } =
+    EditState { beforeCursor = a : bs, afterCursor = as }
 moveRight s = s
 
 moveLeft :: EditState -> EditState
 moveLeft = flipAroundCursor . moveRight . flipAroundCursor
 
 moveDown :: EditState -> EditState
-moveDown editState@EditState {beforeCursor = bs, afterCursor = as} =
-  let col = column editState
-      offset =
-        fromMaybe 0 $ do
-          (startIdx, endIdx) <- nextLine editState
-          return $
-            if col <= endIdx - startIdx
-              then startIdx + col
-              else endIdx
-      (skipped, left) = splitAt offset as
-   in EditState {beforeCursor = reverse skipped ++ bs, afterCursor = left}
+moveDown editState@EditState { beforeCursor = bs, afterCursor = as } =
+    let col    = column editState
+        offset = fromMaybe 0 $ do
+            (startIdx, endIdx) <- nextLine editState
+            return $ if col <= endIdx - startIdx then startIdx + col else endIdx
+        (skipped, left) = splitAt offset as
+    in  EditState { beforeCursor = reverse skipped ++ bs, afterCursor = left }
 
 moveUp :: EditState -> EditState
 moveUp = flipAroundRow . moveDown . flipAroundRow
 
 pushEdit :: Char -> EditState -> EditState
-pushEdit c EditState {beforeCursor = bs, afterCursor = as} =
-  EditState {beforeCursor = c : bs, afterCursor = as}
+pushEdit c EditState { beforeCursor = bs, afterCursor = as } =
+    EditState { beforeCursor = c : bs, afterCursor = as }
 
 pushEdits :: String -> EditState -> EditState
 pushEdits str editState = foldl (flip pushEdit) editState str
 
 popEdit :: EditState -> EditState
-popEdit EditState {beforeCursor = b:bs, afterCursor = as} =
-  EditState {beforeCursor = bs, afterCursor = as}
+popEdit EditState { beforeCursor = b : bs, afterCursor = as } =
+    EditState { beforeCursor = bs, afterCursor = as }
 popEdit s = s
 
 popEdits :: Int -> EditState -> EditState
@@ -136,34 +133,32 @@ popEdits n editState = popEdits (n - 1) $ popEdit editState
 -- IO Functions
 start :: IO ()
 start = do
-  cfg <- standardIOConfig
-  vty <- mkVty cfg
-  run vty emptyEditState
+    cfg <- standardIOConfig
+    vty <- mkVty cfg
+    run vty emptyEditState
 
 run :: Vty -> EditState -> IO ()
 run vty editState = do
-  render vty editState
-  (shouldExit, editState) <- handleEvent vty editState
-  if shouldExit
-    then shutdown vty
-    else run vty editState
+    render vty editState
+    (shouldExit, editState) <- handleEvent vty editState
+    if shouldExit then shutdown vty else run vty editState
 
 handleEvent :: Vty -> EditState -> IO (Bool, EditState)
 handleEvent vty editState = do
-  event <- nextEvent vty
-  case event of
-    EvKey KEsc [] -> return (True, editState)
-    EvKey KLeft [] -> return (False, moveLeft editState)
-    EvKey KRight [] -> return (False, moveRight editState)
-    EvKey KDown [] -> return (False, moveDown editState)
-    EvKey KUp [] -> return (False, moveUp editState)
-    EvKey KEnter [] -> return (False, pushEdit '\n' editState)
-    EvKey KBS [] -> return (False, popEdit editState)
-    EvKey (KChar '\t') [] -> return (False, pushEdits "    " editState)
-    EvKey (KChar c) [] -> return (False, pushEdit c editState)
-    _ -> return (False, editState)
+    event <- nextEvent vty
+    case event of
+        EvKey KEsc         [] -> return (True, editState)
+        EvKey KLeft        [] -> return (False, moveLeft editState)
+        EvKey KRight       [] -> return (False, moveRight editState)
+        EvKey KDown        [] -> return (False, moveDown editState)
+        EvKey KUp          [] -> return (False, moveUp editState)
+        EvKey KEnter       [] -> return (False, pushEdit '\n' editState)
+        EvKey KBS          [] -> return (False, popEdit editState)
+        EvKey (KChar '\t') [] -> return (False, pushEdits "    " editState)
+        EvKey (KChar c   ) [] -> return (False, pushEdit c editState)
+        _                     -> return (False, editState)
 
 render :: Vty -> EditState -> IO ()
 render vty editState = do
-  let pic = picForImage $ renderEditState editState
-  update vty pic
+    let pic = picForImage $ renderEditState editState
+    update vty pic
