@@ -3,6 +3,7 @@ module Lib
     )
 where
 
+import           System.Environment
 import           Control.Lens
 import           Data.List
 import           Data.Maybe
@@ -47,6 +48,10 @@ data EditState = EditState
 emptyEditState :: EditState
 emptyEditState =
     EditState { beforeCursor = "", afterCursor = "", editMode = NormalMode }
+
+editString :: String -> EditState
+editString str =
+    EditState { beforeCursor = "", afterCursor = str, editMode = NormalMode }
 
 -- EditState properties
 getText :: EditState -> String
@@ -149,19 +154,6 @@ popLine editState =
                   , editMode     = mode
                   }
 
--- IO Functions
-start :: IO ()
-start = do
-    cfg <- standardIOConfig
-    vty <- mkVty cfg
-    run vty emptyEditState
-
-run :: Vty -> EditState -> IO ()
-run vty editState = do
-    render vty editState
-    (shouldExit, editState) <- handleEvent vty editState
-    if shouldExit then shutdown vty else run vty editState
-
 handleNormalEvent :: EditState -> Event -> (Bool, EditState)
 handleNormalEvent editState event = case event of
     EvKey KEsc        [] -> (True, editState)
@@ -192,6 +184,29 @@ handleInsertEvent editState event = case event of
     EvKey (KChar '\t') [] -> (False, pushEdits "    " editState)
     EvKey (KChar c   ) [] -> (False, pushEdit c editState)
     _                     -> (False, editState)
+
+-- IO Functions
+editFile :: FilePath -> IO EditState
+editFile filename = do
+    contents <- readFile filename
+    return . editString $ contents
+
+start :: IO ()
+start = do
+    cfg       <- standardIOConfig
+    vty       <- mkVty cfg
+    args      <- getArgs
+    editState <- case args ^? element 0 of
+        Just name -> editFile name
+        Nothing   -> return emptyEditState
+    run vty editState
+    shutdown vty
+
+run :: Vty -> EditState -> IO ()
+run vty editState = do
+    render vty editState
+    (shouldExit, editState) <- handleEvent vty editState
+    if shouldExit then return () else run vty editState
 
 handleEvent :: Vty -> EditState -> IO (Bool, EditState)
 handleEvent vty editState = do
