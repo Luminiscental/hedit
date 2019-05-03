@@ -26,9 +26,6 @@ textAttr = defAttr `withForeColor` blue `withBackColor` black
 cursorAttr :: Attr
 cursorAttr = defAttr `withForeColor` green `withBackColor` black
 
-cursorImg :: Image
-cursorImg = string cursorAttr "|"
-
 textToImg :: String -> Image
 textToImg = string textAttr
 
@@ -122,7 +119,7 @@ flipAroundRow :: EditState -> EditState
 flipAroundRow editState =
     let beforeLines = stableLines . beforeCursor $ editState
         afterLines  = stableLines . afterCursor $ editState
-        flipped ls = map reverse $ tail ls
+        flipped = map reverse . tail
         flippedToAfter  = flipped beforeLines
         flippedToBefore = flipped afterLines
         stillBefore     = head beforeLines
