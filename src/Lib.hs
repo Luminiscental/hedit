@@ -78,8 +78,8 @@ nextLine :: EditState -> Maybe (Int, Int)
 nextLine editState = do
     let after   = afterCursor editState
         indices = elemIndices '\n' after
+        endIdx  = fromMaybe (length after) $ indices ^? element 1
     preIdx <- indices ^? element 0
-    let endIdx = fromMaybe (length after) $ indices ^? element 1
     return (preIdx + 1, endIdx)
 
 showPos :: EditState -> String
@@ -117,9 +117,9 @@ flipAroundCursor EditState { beforeCursor = bs, afterCursor = as, editMode = edi
 
 flipAroundRow :: EditState -> EditState
 flipAroundRow editState =
-    let beforeLines = stableLines . beforeCursor $ editState
-        afterLines  = stableLines . afterCursor $ editState
-        flipped = map reverse . tail
+    let beforeLines     = stableLines . beforeCursor $ editState
+        afterLines      = stableLines . afterCursor $ editState
+        flipped         = map reverse . tail
         flippedToAfter  = flipped beforeLines
         flippedToBefore = flipped afterLines
         stillBefore     = head beforeLines
@@ -287,8 +287,8 @@ handleEvent vty editState = do
 render :: Vty -> EditState -> IO ()
 render vty editState = do
     let img    = renderText editState
-    let r      = row editState
-    let c      = column editState
-    let cursor = Cursor c r
-    let pic    = Picture cursor [img] ClearBackground
+        r      = row editState
+        c      = column editState
+        cursor = Cursor c r
+        pic    = Picture cursor [img] ClearBackground
     update vty pic
