@@ -11,6 +11,7 @@ import           Data.Maybe
 import           Graphics.Vty
 
 -- Pure utility functions
+
 stableLines :: String -> [String]
 stableLines = ((++) <$> init <*> (: []) . init . last) . lines . (++ "%")
 
@@ -18,6 +19,7 @@ stableUnlines :: [String] -> String
 stableUnlines = foldl1 (\acc line -> acc ++ '\n' : line)
 
 -- Vty utility functions
+
 textAttr :: Attr
 textAttr = defAttr `withForeColor` blue `withBackColor` black
 
@@ -37,6 +39,7 @@ stackImgs :: [Image] -> Image
 stackImgs = foldl (<->) emptyImage
 
 -- EditState data type
+
 data EditMode = NormalMode | InsertMode;
 data EditFile = ExistingFile String | NewFile;
 
@@ -48,6 +51,7 @@ data EditState = EditState
   }
 
 -- EditState constructors
+
 emptyEditState :: EditState
 emptyEditState = EditState { beforeCursor = ""
                            , afterCursor  = ""
@@ -63,6 +67,7 @@ editString str = EditState { beforeCursor = ""
                            }
 
 -- EditState properties
+
 getText :: EditState -> String
 getText EditState { beforeCursor = b, afterCursor = a } = reverse b ++ a
 
@@ -226,6 +231,7 @@ handleInsertEvent editState event = case event of
     _                     -> (False, editState)
 
 -- IO Functions
+
 loadFile :: FilePath -> IO EditState
 loadFile filename = do
     fileExists <- doesFileExist filename
@@ -268,9 +274,10 @@ askInput vty msg input = do
 
 closeFile :: Vty -> EditState -> IO ()
 closeFile vty editState = do
-    filename <- askInput vty "Save file as:" $ case editFile editState of
-        ExistingFile str -> str
-        NewFile          -> ""
+    filename <-
+        askInput vty "Saving...\n\n  save file as:" $ case editFile editState of
+            ExistingFile str -> str
+            NewFile          -> ""
     writeFile filename . getText $ editState
 
 handleEvent :: Vty -> EditState -> IO (Bool, EditState)
