@@ -25,6 +25,7 @@ dependencies:
 - mtl
 - vty
 - lens
+- directory
 
 library:
   source-dirs: src

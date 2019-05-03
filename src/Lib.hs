@@ -4,6 +4,7 @@ module Lib
 where
 
 import           System.Environment
+import           System.Directory
 import           Control.Lens
 import           Data.List
 import           Data.Maybe
@@ -37,21 +38,29 @@ stackImgs = foldl (<->) emptyImage
 
 -- EditState data type
 data EditMode = NormalMode | InsertMode;
+data EditFile = ExistingFile String | NewFile;
 
 data EditState = EditState
   { beforeCursor :: String
   , afterCursor :: String
   , editMode :: EditMode
+  , editFile :: EditFile
   }
 
 -- EditState constructors
 emptyEditState :: EditState
-emptyEditState =
-    EditState { beforeCursor = "", afterCursor = "", editMode = NormalMode }
+emptyEditState = EditState { beforeCursor = ""
+                           , afterCursor  = ""
+                           , editMode     = NormalMode
+                           , editFile     = NewFile
+                           }
 
 editString :: String -> EditState
-editString str =
-    EditState { beforeCursor = "", afterCursor = str, editMode = NormalMode }
+editString str = EditState { beforeCursor = ""
+                           , afterCursor  = str
+                           , editMode     = NormalMode
+                           , editFile     = ExistingFile str
+                           }
 
 -- EditState properties
 getText :: EditState -> String
@@ -79,13 +88,30 @@ renderText :: EditState -> Image
 renderText = stackImgs . strToImgs . getText
 
 -- EditState mutations
+
+setEditFile :: FilePath -> EditState -> EditState
+setEditFile path EditState { beforeCursor = bs, afterCursor = as, editMode = mode, editFile = _ }
+    = EditState { beforeCursor = bs
+                , afterCursor  = as
+                , editMode     = mode
+                , editFile     = ExistingFile path
+                }
+
 setEditMode :: EditMode -> EditState -> EditState
-setEditMode mode EditState { beforeCursor = bs, afterCursor = as, editMode = _ }
-    = EditState { beforeCursor = bs, afterCursor = as, editMode = mode }
+setEditMode mode EditState { beforeCursor = bs, afterCursor = as, editMode = _, editFile = editFile }
+    = EditState { beforeCursor = bs
+                , afterCursor  = as
+                , editMode     = mode
+                , editFile     = editFile
+                }
 
 flipAroundCursor :: EditState -> EditState
-flipAroundCursor EditState { beforeCursor = bs, afterCursor = as, editMode = editMode }
-    = EditState { beforeCursor = as, afterCursor = bs, editMode = editMode }
+flipAroundCursor EditState { beforeCursor = bs, afterCursor = as, editMode = editMode, editFile = editFile }
+    = EditState { beforeCursor = as
+                , afterCursor  = bs
+                , editMode     = editMode
+                , editFile     = editFile
+                }
 
 flipAroundRow :: EditState -> EditState
 flipAroundRow editState =
@@ -99,18 +125,23 @@ flipAroundRow editState =
     in  EditState { beforeCursor = stableUnlines $ stillBefore : flippedToBefore
                   , afterCursor  = stableUnlines $ stillAfter : flippedToAfter
                   , editMode     = editMode editState
+                  , editFile     = editFile editState
                   }
 
 moveRight :: EditState -> EditState
-moveRight EditState { beforeCursor = bs, afterCursor = a : as, editMode = editMode }
-    = EditState { beforeCursor = a : bs, afterCursor = as, editMode = editMode }
+moveRight EditState { beforeCursor = bs, afterCursor = a : as, editMode = editMode, editFile = editFile }
+    = EditState { beforeCursor = a : bs
+                , afterCursor  = as
+                , editMode     = editMode
+                , editFile     = editFile
+                }
 moveRight s = s
 
 moveLeft :: EditState -> EditState
 moveLeft = flipAroundCursor . moveRight . flipAroundCursor
 
 moveDown :: EditState -> EditState
-moveDown editState@EditState { beforeCursor = bs, afterCursor = as, editMode = editMode }
+moveDown editState@EditState { beforeCursor = bs, afterCursor = as, editMode = editMode, editFile = editFile }
     = let col    = column editState
           offset = fromMaybe 0 $ do
               (startIdx, endIdx) <- nextLine editState
@@ -121,21 +152,30 @@ moveDown editState@EditState { beforeCursor = bs, afterCursor = as, editMode = e
       in  EditState { beforeCursor = reverse skipped ++ bs
                     , afterCursor  = left
                     , editMode     = editMode
+                    , editFile     = editFile
                     }
 
 moveUp :: EditState -> EditState
 moveUp = flipAroundRow . moveDown . flipAroundRow
 
 pushEdit :: Char -> EditState -> EditState
-pushEdit c EditState { beforeCursor = bs, afterCursor = as, editMode = editMode }
-    = EditState { beforeCursor = c : bs, afterCursor = as, editMode = editMode }
+pushEdit c EditState { beforeCursor = bs, afterCursor = as, editMode = editMode, editFile = editFile }
+    = EditState { beforeCursor = c : bs
+                , afterCursor  = as
+                , editMode     = editMode
+                , editFile     = editFile
+                }
 
 pushEdits :: String -> EditState -> EditState
 pushEdits str editState = foldl (flip pushEdit) editState str
 
 popEdit :: EditState -> EditState
-popEdit EditState { beforeCursor = b : bs, afterCursor = as, editMode = editMode }
-    = EditState { beforeCursor = bs, afterCursor = as, editMode = editMode }
+popEdit EditState { beforeCursor = b : bs, afterCursor = as, editMode = editMode, editFile = editFile }
+    = EditState { beforeCursor = bs
+                , afterCursor  = as
+                , editMode     = editMode
+                , editFile     = editFile
+                }
 popEdit s = s
 
 popEdits :: Int -> EditState -> EditState
@@ -146,12 +186,12 @@ popLine :: EditState -> EditState
 popLine editState =
     let before   = beforeCursor editState
         after    = afterCursor editState
-        mode     = editMode editState
         startIdx = fromMaybe (-1) $ elemIndex '\n' before
         endIdx   = fromMaybe (-1) $ elemIndex '\n' after
     in  EditState { beforeCursor = drop (startIdx + 1) before
                   , afterCursor  = drop endIdx after
-                  , editMode     = mode
+                  , editMode     = editMode editState
+                  , editFile     = editFile editState
                   }
 
 handleNormalEvent :: EditState -> Event -> (Bool, EditState)
@@ -186,10 +226,11 @@ handleInsertEvent editState event = case event of
     _                     -> (False, editState)
 
 -- IO Functions
-editFile :: FilePath -> IO EditState
-editFile filename = do
-    contents <- readFile filename
-    return . editString $ contents
+loadFile :: FilePath -> IO EditState
+loadFile filename = do
+    fileExists <- doesFileExist filename
+    contents   <- if fileExists then readFile filename else return ""
+    return . setEditFile filename . editString $ contents
 
 start :: IO ()
 start = do
@@ -197,7 +238,7 @@ start = do
     vty       <- mkVty cfg
     args      <- getArgs
     editState <- case args ^? element 0 of
-        Just name -> editFile name
+        Just name -> loadFile name
         Nothing   -> return emptyEditState
     run vty editState
     shutdown vty
@@ -206,7 +247,31 @@ run :: Vty -> EditState -> IO ()
 run vty editState = do
     render vty editState
     (shouldExit, editState) <- handleEvent vty editState
-    if shouldExit then return () else run vty editState
+    if shouldExit then closeFile vty editState else run vty editState
+
+askInput :: Vty -> String -> String -> IO String
+askInput vty msg input = do
+    let content      = msg ++ " " ++ input
+        displayLines = stableLines content
+        r            = subtract 1 . length $ displayLines
+        c            = length . last $ displayLines
+        img          = stackImgs . strToImgs $ content
+        cursor       = Cursor c r
+        pic          = Picture cursor [img] ClearBackground
+    update vty pic
+    event <- nextEvent vty
+    case event of
+        EvKey KEnter    [] -> return input
+        EvKey KBS       [] -> askInput vty msg . init $ input
+        EvKey (KChar c) [] -> askInput vty msg (input ++ [c])
+        _                  -> askInput vty msg input
+
+closeFile :: Vty -> EditState -> IO ()
+closeFile vty editState = do
+    filename <- askInput vty "Save file as:" $ case editFile editState of
+        ExistingFile str -> str
+        NewFile          -> ""
+    writeFile filename . getText $ editState
 
 handleEvent :: Vty -> EditState -> IO (Bool, EditState)
 handleEvent vty editState = do
