@@ -1,5 +1,7 @@
 module Lib
     ( start
+    , stableLines
+    , stableUnlines
     )
 where
 
@@ -84,8 +86,38 @@ showPos :: EditableText -> String
 showPos = combineToString <$> row <*> column
     where combineToString row col = show row ++ ":" ++ show col
 
-renderText :: EditableText -> Image
-renderText = stackImgs . strToImgs . getText
+linesBefore :: EditableText -> [String]
+linesBefore = init . stableLines . reverse . beforeCursor
+
+linesAfter :: EditableText -> [String]
+linesAfter = tail . stableLines . afterCursor
+
+cursorLine :: EditableText -> String
+cursorLine =
+    (++)
+        <$> last
+        .   stableLines
+        .   reverse
+        .   beforeCursor
+        <*> head
+        .   stableLines
+        .   afterCursor
+
+renderText :: Int -> EditableText -> Image
+renderText height editText =
+    let halfHeight = quot height 2
+        aboveLines =
+                reverse . take halfHeight . reverse . linesBefore $ editText
+        belowLines = take halfHeight . linesAfter $ editText
+        centerLine = cursorLine editText
+        linesToImgs lines = case lines of
+            [] -> [emptyImage]
+            _  -> strToImgs . stableUnlines $ lines
+        aboveImgs = linesToImgs aboveLines
+        belowImgs = linesToImgs belowLines
+        centerImg = strToImgs centerLine
+        imgs      = aboveImgs ++ centerImg ++ belowImgs
+    in  stackImgs imgs
 
 -- EditState mutations
 
@@ -268,9 +300,12 @@ handleEvent vty editState = do
 
 render :: Vty -> EditState -> IO ()
 render vty editState = do
-    let img    = renderText . editText $ editState
-        r      = row . editText $ editState
+    let output = outputIface vty
+    (width, height) <- displayBounds output
+    let img    = renderText height . editText $ editState
+        r      = quot height 2
         c      = column . editText $ editState
+    --TODO: fix this for when cursor is < halfHeight from the top of the file       
         cursor = Cursor c r
         pic    = Picture cursor [img] ClearBackground
     update vty pic
