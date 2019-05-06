@@ -37,44 +37,42 @@ stackImgs = foldl (<->) emptyImage
 
 -- EditState data type
 
+data EditableText = EditableText { beforeCursor :: String, afterCursor :: String }
 data EditMode = NormalMode | InsertMode;
 data EditFile = ExistingFile String | NewFile;
 
 data EditState = EditState
-  { beforeCursor :: String
-  , afterCursor :: String
+  { editText :: EditableText
   , editMode :: EditMode
   , editFile :: EditFile
   }
 
 -- EditState constructors
 
+emptyText :: EditableText
+emptyText = EditableText { beforeCursor = "", afterCursor = "" }
+
 emptyEditState :: EditState
-emptyEditState = EditState { beforeCursor = ""
-                           , afterCursor  = ""
-                           , editMode     = NormalMode
-                           , editFile     = NewFile
+emptyEditState = EditState { editText = emptyText
+                           , editMode = NormalMode
+                           , editFile = NewFile
                            }
 
-editString :: String -> EditState
-editString str = EditState { beforeCursor = ""
-                           , afterCursor  = str
-                           , editMode     = NormalMode
-                           , editFile     = ExistingFile str
-                           }
+editString :: String -> EditableText
+editString str = EditableText { beforeCursor = "", afterCursor = str }
 
 -- EditState properties
 
-getText :: EditState -> String
-getText EditState { beforeCursor = b, afterCursor = a } = reverse b ++ a
+getText :: EditableText -> String
+getText EditableText { beforeCursor = b, afterCursor = a } = reverse b ++ a
 
-row :: EditState -> Int
+row :: EditableText -> Int
 row = subtract 1 . length . stableLines . beforeCursor
 
-column :: EditState -> Int
+column :: EditableText -> Int
 column = (fromMaybe <$> length <*> elemIndex '\n') . beforeCursor
 
-nextLine :: EditState -> Maybe (Int, Int)
+nextLine :: EditableText -> Maybe (Int, Int)
 nextLine editState = do
     let after   = afterCursor editState
         indices = elemIndices '\n' after
@@ -82,40 +80,32 @@ nextLine editState = do
     preIdx <- indices ^? element 0
     return (preIdx + 1, endIdx)
 
-showPos :: EditState -> String
+showPos :: EditableText -> String
 showPos = combineToString <$> row <*> column
     where combineToString row col = show row ++ ":" ++ show col
 
-renderText :: EditState -> Image
+renderText :: EditableText -> Image
 renderText = stackImgs . strToImgs . getText
 
 -- EditState mutations
 
+setEditText :: EditableText -> EditState -> EditState
+setEditText text EditState { editText = _, editMode = m, editFile = f } =
+    EditState { editText = text, editMode = m, editFile = f }
+
 setEditFile :: FilePath -> EditState -> EditState
-setEditFile path EditState { beforeCursor = bs, afterCursor = as, editMode = mode, editFile = _ }
-    = EditState { beforeCursor = bs
-                , afterCursor  = as
-                , editMode     = mode
-                , editFile     = ExistingFile path
-                }
+setEditFile path EditState { editText = t, editMode = m, editFile = _ } =
+    EditState { editText = t, editMode = m, editFile = ExistingFile path }
 
 setEditMode :: EditMode -> EditState -> EditState
-setEditMode mode EditState { beforeCursor = bs, afterCursor = as, editMode = _, editFile = editFile }
-    = EditState { beforeCursor = bs
-                , afterCursor  = as
-                , editMode     = mode
-                , editFile     = editFile
-                }
+setEditMode mode EditState { editText = t, editMode = _, editFile = f } =
+    EditState { editText = t, editMode = mode, editFile = f }
 
-flipAroundCursor :: EditState -> EditState
-flipAroundCursor EditState { beforeCursor = bs, afterCursor = as, editMode = editMode, editFile = editFile }
-    = EditState { beforeCursor = as
-                , afterCursor  = bs
-                , editMode     = editMode
-                , editFile     = editFile
-                }
+flipAroundCursor :: EditableText -> EditableText
+flipAroundCursor EditableText { beforeCursor = bs, afterCursor = as } =
+    EditableText { beforeCursor = as, afterCursor = bs }
 
-flipAroundRow :: EditState -> EditState
+flipAroundRow :: EditableText -> EditableText
 flipAroundRow editState =
     let beforeLines     = stableLines . beforeCursor $ editState
         afterLines      = stableLines . afterCursor $ editState
@@ -124,107 +114,94 @@ flipAroundRow editState =
         flippedToBefore = flipped afterLines
         stillBefore     = head beforeLines
         stillAfter      = head afterLines
-    in  EditState { beforeCursor = stableUnlines $ stillBefore : flippedToBefore
-                  , afterCursor  = stableUnlines $ stillAfter : flippedToAfter
-                  , editMode     = editMode editState
-                  , editFile     = editFile editState
-                  }
+    in  EditableText
+            { beforeCursor = stableUnlines $ stillBefore : flippedToBefore
+            , afterCursor  = stableUnlines $ stillAfter : flippedToAfter
+            }
 
-moveRight :: EditState -> EditState
-moveRight EditState { beforeCursor = bs, afterCursor = a : as, editMode = editMode, editFile = editFile }
-    = EditState { beforeCursor = a : bs
-                , afterCursor  = as
-                , editMode     = editMode
-                , editFile     = editFile
-                }
-moveRight s = s
+moveRight :: EditableText -> EditableText
+moveRight EditableText { beforeCursor = bs, afterCursor = a : as } =
+    EditableText { beforeCursor = a : bs, afterCursor = as }
+moveRight t = t
 
-moveLeft :: EditState -> EditState
+moveLeft :: EditableText -> EditableText
 moveLeft = flipAroundCursor . moveRight . flipAroundCursor
 
-moveDown :: EditState -> EditState
-moveDown editState@EditState { beforeCursor = bs, afterCursor = as, editMode = editMode, editFile = editFile }
-    = let col    = column editState
-          offset = fromMaybe 0 $ do
-              (startIdx, endIdx) <- nextLine editState
-              return $ if col <= endIdx - startIdx
-                  then startIdx + col
-                  else endIdx
-          (skipped, left) = splitAt offset as
-      in  EditState { beforeCursor = reverse skipped ++ bs
-                    , afterCursor  = left
-                    , editMode     = editMode
-                    , editFile     = editFile
-                    }
+moveDown :: EditableText -> EditableText
+moveDown editText =
+    let col    = column editText
+        offset = fromMaybe 0 $ do
+            (startIdx, endIdx) <- nextLine editText
+            return $ if col <= endIdx - startIdx then startIdx + col else endIdx
+        (skipped, left) = splitAt offset $ afterCursor editText
+    in  EditableText { beforeCursor = reverse skipped ++ beforeCursor editText
+                     , afterCursor  = left
+                     }
 
-moveUp :: EditState -> EditState
+moveUp :: EditableText -> EditableText
 moveUp = flipAroundRow . moveDown . flipAroundRow
 
-pushEdit :: Char -> EditState -> EditState
-pushEdit c EditState { beforeCursor = bs, afterCursor = as, editMode = editMode, editFile = editFile }
-    = EditState { beforeCursor = c : bs
-                , afterCursor  = as
-                , editMode     = editMode
-                , editFile     = editFile
-                }
+pushEdit :: Char -> EditableText -> EditableText
+pushEdit c EditableText { beforeCursor = bs, afterCursor = as } =
+    EditableText { beforeCursor = c : bs, afterCursor = as }
 
-pushEdits :: String -> EditState -> EditState
-pushEdits str editState = foldl (flip pushEdit) editState str
+pushEdits :: String -> EditableText -> EditableText
+pushEdits str editText = foldl (flip pushEdit) editText str
 
-popEdit :: EditState -> EditState
-popEdit EditState { beforeCursor = b : bs, afterCursor = as, editMode = editMode, editFile = editFile }
-    = EditState { beforeCursor = bs
-                , afterCursor  = as
-                , editMode     = editMode
-                , editFile     = editFile
-                }
-popEdit s = s
+popEdit :: EditableText -> EditableText
+popEdit EditableText { beforeCursor = b : bs, afterCursor = as } =
+    EditableText { beforeCursor = bs, afterCursor = as }
+popEdit t = t
 
-popEdits :: Int -> EditState -> EditState
-popEdits 0 editState = editState
-popEdits n editState = popEdits (n - 1) $ popEdit editState
+popEdits :: Int -> EditableText -> EditableText
+popEdits 0 = id
+popEdits n = popEdits (n - 1) . popEdit
 
-popLine :: EditState -> EditState
-popLine editState =
-    let before   = beforeCursor editState
-        after    = afterCursor editState
+popLine :: EditableText -> EditableText
+popLine editText =
+    let before   = beforeCursor editText
+        after    = afterCursor editText
         startIdx = fromMaybe (-1) $ elemIndex '\n' before
         endIdx   = fromMaybe (-1) $ elemIndex '\n' after
-    in  EditState { beforeCursor = drop (startIdx + 1) before
-                  , afterCursor  = drop endIdx after
-                  , editMode     = editMode editState
-                  , editFile     = editFile editState
-                  }
+    in  EditableText { beforeCursor = drop (startIdx + 1) before
+                     , afterCursor  = drop endIdx after
+                     }
+
+applyEdit :: (EditableText -> EditableText) -> EditState -> EditState
+applyEdit edit state = EditState { editText = edit . editText $ state
+                                 , editMode = editMode state
+                                 , editFile = editFile state
+                                 }
 
 handleNormalEvent :: EditState -> Event -> (Bool, EditState)
 handleNormalEvent editState event = case event of
     EvKey KEsc        [] -> (True, editState)
     EvKey (KChar 'i') [] -> (False, setEditMode InsertMode editState)
-    EvKey KLeft       [] -> (False, moveLeft editState)
-    EvKey KRight      [] -> (False, moveRight editState)
-    EvKey KDown       [] -> (False, moveDown editState)
-    EvKey KUp         [] -> (False, moveUp editState)
-    EvKey (KChar 'h') [] -> (False, moveLeft editState)
-    EvKey (KChar 'j') [] -> (False, moveDown editState)
-    EvKey (KChar 'k') [] -> (False, moveUp editState)
-    EvKey (KChar 'l') [] -> (False, moveRight editState)
-    EvKey (KChar 'x') [] -> (False, popEdit editState)
-    EvKey (KChar 'd') [] -> (False, popLine editState)
+    EvKey KLeft       [] -> (False, applyEdit moveLeft editState)
+    EvKey KRight      [] -> (False, applyEdit moveRight editState)
+    EvKey KDown       [] -> (False, applyEdit moveDown editState)
+    EvKey KUp         [] -> (False, applyEdit moveUp editState)
+    EvKey (KChar 'h') [] -> (False, applyEdit moveLeft editState)
+    EvKey (KChar 'j') [] -> (False, applyEdit moveDown editState)
+    EvKey (KChar 'k') [] -> (False, applyEdit moveUp editState)
+    EvKey (KChar 'l') [] -> (False, applyEdit moveRight editState)
+    EvKey (KChar 'x') [] -> (False, applyEdit popEdit editState)
+    EvKey (KChar 'd') [] -> (False, applyEdit popLine editState)
     EvKey (KChar 'c') [] ->
-        (False, setEditMode InsertMode . popEdit $ editState)
+        (False, setEditMode InsertMode . applyEdit popEdit $ editState)
     _ -> (False, editState)
 
 handleInsertEvent :: EditState -> Event -> (Bool, EditState)
 handleInsertEvent editState event = case event of
     EvKey KEsc         [] -> (False, setEditMode NormalMode editState)
-    EvKey KLeft        [] -> (False, moveLeft editState)
-    EvKey KRight       [] -> (False, moveRight editState)
-    EvKey KDown        [] -> (False, moveDown editState)
-    EvKey KUp          [] -> (False, moveUp editState)
-    EvKey KEnter       [] -> (False, pushEdit '\n' editState)
-    EvKey KBS          [] -> (False, popEdit editState)
-    EvKey (KChar '\t') [] -> (False, pushEdits "    " editState)
-    EvKey (KChar c   ) [] -> (False, pushEdit c editState)
+    EvKey KLeft        [] -> (False, applyEdit moveLeft editState)
+    EvKey KRight       [] -> (False, applyEdit moveRight editState)
+    EvKey KDown        [] -> (False, applyEdit moveDown editState)
+    EvKey KUp          [] -> (False, applyEdit moveUp editState)
+    EvKey KEnter       [] -> (False, applyEdit (pushEdit '\n') editState)
+    EvKey KBS          [] -> (False, applyEdit popEdit editState)
+    EvKey (KChar '\t') [] -> (False, applyEdit (pushEdits "    ") editState)
+    EvKey (KChar c   ) [] -> (False, applyEdit (pushEdit c) editState)
     _                     -> (False, editState)
 
 -- IO Functions
@@ -233,7 +210,12 @@ loadFile :: FilePath -> IO EditState
 loadFile filename = do
     fileExists <- doesFileExist filename
     contents   <- if fileExists then readFile filename else return ""
-    return . setEditFile filename . editString $ contents
+    return
+        . setEditFile filename
+        . ($ emptyEditState)
+        . setEditText
+        . editString
+        $ contents
 
 start :: IO ()
 start = do
@@ -275,7 +257,7 @@ closeFile vty editState = do
         askInput vty "Saving...\n\n  save file as:" $ case editFile editState of
             ExistingFile str -> str
             NewFile          -> ""
-    writeFile filename . getText $ editState
+    writeFile filename . getText . editText $ editState
 
 handleEvent :: Vty -> EditState -> IO (Bool, EditState)
 handleEvent vty editState = do
@@ -286,9 +268,9 @@ handleEvent vty editState = do
 
 render :: Vty -> EditState -> IO ()
 render vty editState = do
-    let img    = renderText editState
-        r      = row editState
-        c      = column editState
+    let img    = renderText . editText $ editState
+        r      = row . editText $ editState
+        c      = column . editText $ editState
         cursor = Cursor c r
         pic    = Picture cursor [img] ClearBackground
     update vty pic
