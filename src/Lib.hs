@@ -47,6 +47,7 @@ data EditState = EditState
   { editText :: EditableText
   , editMode :: EditMode
   , editFile :: EditFile
+  , viewOffset :: Int
   }
 
 -- EditState constructors
@@ -55,9 +56,10 @@ emptyText :: EditableText
 emptyText = EditableText { beforeCursor = "", afterCursor = "" }
 
 emptyEditState :: EditState
-emptyEditState = EditState { editText = emptyText
-                           , editMode = NormalMode
-                           , editFile = NewFile
+emptyEditState = EditState { editText   = emptyText
+                           , editMode   = NormalMode
+                           , editFile   = NewFile
+                           , viewOffset = 0
                            }
 
 editString :: String -> EditableText
@@ -103,35 +105,41 @@ cursorLine =
         .   stableLines
         .   afterCursor
 
-renderText :: Int -> EditableText -> Image
-renderText height editText =
-    let halfHeight = quot height 2
-        aboveLines =
-                reverse . take halfHeight . reverse . linesBefore $ editText
-        belowLines = take halfHeight . linesAfter $ editText
-        centerLine = cursorLine editText
-        linesToImgs lines = case lines of
-            [] -> [emptyImage]
-            _  -> strToImgs . stableUnlines $ lines
-        aboveImgs = linesToImgs aboveLines
-        belowImgs = linesToImgs belowLines
-        centerImg = strToImgs centerLine
-        imgs      = aboveImgs ++ centerImg ++ belowImgs
+renderText :: Int -> Int -> EditableText -> Image
+renderText offset height editText =
+    let aboveLines  = linesBefore editText
+        belowLines  = linesAfter editText
+        centerLine  = cursorLine editText
+        allLines    = aboveLines ++ centerLine : belowLines
+        renderLines = take height . drop offset $ allLines
+        imgs        = strToImgs . stableUnlines $ renderLines
     in  stackImgs imgs
 
 -- EditState mutations
 
 setEditText :: EditableText -> EditState -> EditState
-setEditText text EditState { editText = _, editMode = m, editFile = f } =
-    EditState { editText = text, editMode = m, editFile = f }
+setEditText text EditState { editText = _, editMode = m, editFile = f, viewOffset = o }
+    = EditState { editText = text, editMode = m, editFile = f, viewOffset = o }
 
 setEditFile :: FilePath -> EditState -> EditState
-setEditFile path EditState { editText = t, editMode = m, editFile = _ } =
-    EditState { editText = t, editMode = m, editFile = ExistingFile path }
+setEditFile path EditState { editText = t, editMode = m, editFile = _, viewOffset = o }
+    = EditState { editText   = t
+                , editMode   = m
+                , editFile   = ExistingFile path
+                , viewOffset = o
+                }
 
 setEditMode :: EditMode -> EditState -> EditState
-setEditMode mode EditState { editText = t, editMode = _, editFile = f } =
-    EditState { editText = t, editMode = mode, editFile = f }
+setEditMode mode EditState { editText = t, editMode = _, editFile = f, viewOffset = o }
+    = EditState { editText = t, editMode = mode, editFile = f, viewOffset = o }
+
+setViewOffset :: Int -> EditState -> EditState
+setViewOffset offset EditState { editText = t, editFile = f, editMode = m, viewOffset = _ }
+    = EditState { editText   = t
+                , editFile   = f
+                , editMode   = m
+                , viewOffset = offset
+                }
 
 flipAroundCursor :: EditableText -> EditableText
 flipAroundCursor EditableText { beforeCursor = bs, afterCursor = as } =
@@ -199,42 +207,54 @@ popLine editText =
                      , afterCursor  = drop endIdx after
                      }
 
-applyEdit :: (EditableText -> EditableText) -> EditState -> EditState
-applyEdit edit state = EditState { editText = edit . editText $ state
-                                 , editMode = editMode state
-                                 , editFile = editFile state
-                                 }
+updateOffset :: Int -> EditState -> EditState
+updateOffset height editState = setViewOffset newOffset editState  where
+    newOffset =
+        let r = row . editText $ editState
+            o = viewOffset editState
+        in  if r - o < 0 then r else if r - o >= height then r - height else o
 
-handleNormalEvent :: EditState -> Event -> (Bool, EditState)
-handleNormalEvent editState event = case event of
+
+applyEdit :: Int -> (EditableText -> EditableText) -> EditState -> EditState
+applyEdit height edit state = updateOffset
+    height
+    EditState { editText   = edit . editText $ state
+              , editMode   = editMode state
+              , editFile   = editFile state
+              , viewOffset = viewOffset state
+              }
+
+handleNormalEvent :: Int -> EditState -> Event -> (Bool, EditState)
+handleNormalEvent height editState event = case event of
     EvKey KEsc        [] -> (True, editState)
     EvKey (KChar 'i') [] -> (False, setEditMode InsertMode editState)
-    EvKey KLeft       [] -> (False, applyEdit moveLeft editState)
-    EvKey KRight      [] -> (False, applyEdit moveRight editState)
-    EvKey KDown       [] -> (False, applyEdit moveDown editState)
-    EvKey KUp         [] -> (False, applyEdit moveUp editState)
-    EvKey (KChar 'h') [] -> (False, applyEdit moveLeft editState)
-    EvKey (KChar 'j') [] -> (False, applyEdit moveDown editState)
-    EvKey (KChar 'k') [] -> (False, applyEdit moveUp editState)
-    EvKey (KChar 'l') [] -> (False, applyEdit moveRight editState)
-    EvKey (KChar 'x') [] -> (False, applyEdit popEdit editState)
-    EvKey (KChar 'd') [] -> (False, applyEdit popLine editState)
+    EvKey KLeft       [] -> (False, applyEdit height moveLeft editState)
+    EvKey KRight      [] -> (False, applyEdit height moveRight editState)
+    EvKey KDown       [] -> (False, applyEdit height moveDown editState)
+    EvKey KUp         [] -> (False, applyEdit height moveUp editState)
+    EvKey (KChar 'h') [] -> (False, applyEdit height moveLeft editState)
+    EvKey (KChar 'j') [] -> (False, applyEdit height moveDown editState)
+    EvKey (KChar 'k') [] -> (False, applyEdit height moveUp editState)
+    EvKey (KChar 'l') [] -> (False, applyEdit height moveRight editState)
+    EvKey (KChar 'x') [] -> (False, applyEdit height popEdit editState)
+    EvKey (KChar 'd') [] -> (False, applyEdit height popLine editState)
     EvKey (KChar 'c') [] ->
-        (False, setEditMode InsertMode . applyEdit popEdit $ editState)
+        (False, setEditMode InsertMode . applyEdit height popEdit $ editState)
     _ -> (False, editState)
 
-handleInsertEvent :: EditState -> Event -> (Bool, EditState)
-handleInsertEvent editState event = case event of
-    EvKey KEsc         [] -> (False, setEditMode NormalMode editState)
-    EvKey KLeft        [] -> (False, applyEdit moveLeft editState)
-    EvKey KRight       [] -> (False, applyEdit moveRight editState)
-    EvKey KDown        [] -> (False, applyEdit moveDown editState)
-    EvKey KUp          [] -> (False, applyEdit moveUp editState)
-    EvKey KEnter       [] -> (False, applyEdit (pushEdit '\n') editState)
-    EvKey KBS          [] -> (False, applyEdit popEdit editState)
-    EvKey (KChar '\t') [] -> (False, applyEdit (pushEdits "    ") editState)
-    EvKey (KChar c   ) [] -> (False, applyEdit (pushEdit c) editState)
-    _                     -> (False, editState)
+handleInsertEvent :: Int -> EditState -> Event -> (Bool, EditState)
+handleInsertEvent height editState event = case event of
+    EvKey KEsc   [] -> (False, setEditMode NormalMode editState)
+    EvKey KLeft  [] -> (False, applyEdit height moveLeft editState)
+    EvKey KRight [] -> (False, applyEdit height moveRight editState)
+    EvKey KDown  [] -> (False, applyEdit height moveDown editState)
+    EvKey KUp    [] -> (False, applyEdit height moveUp editState)
+    EvKey KEnter [] -> (False, applyEdit height (pushEdit '\n') editState)
+    EvKey KBS    [] -> (False, applyEdit height popEdit editState)
+    EvKey (KChar '\t') [] ->
+        (False, applyEdit height (pushEdits "    ") editState)
+    EvKey (KChar c) [] -> (False, applyEdit height (pushEdit c) editState)
+    _                  -> (False, editState)
 
 -- IO Functions
 
@@ -294,18 +314,20 @@ closeFile vty editState = do
 handleEvent :: Vty -> EditState -> IO (Bool, EditState)
 handleEvent vty editState = do
     event <- nextEvent vty
+    let output = outputIface vty
+    (width, height) <- displayBounds output
     case editMode editState of
-        NormalMode -> return $ handleNormalEvent editState event
-        InsertMode -> return $ handleInsertEvent editState event
+        NormalMode -> return $ handleNormalEvent height editState event
+        InsertMode -> return $ handleInsertEvent height editState event
 
 render :: Vty -> EditState -> IO ()
 render vty editState = do
     let output = outputIface vty
     (width, height) <- displayBounds output
-    let img    = renderText height . editText $ editState
-        r      = quot height 2
+    let offset = viewOffset editState
+        img    = renderText offset height . editText $ editState
+        r      = row . editText $ editState
         c      = column . editText $ editState
-    --TODO: fix this for when cursor is < halfHeight from the top of the file       
-        cursor = Cursor c r
+        cursor = Cursor c (r - offset)
         pic    = Picture cursor [img] ClearBackground
     update vty pic
