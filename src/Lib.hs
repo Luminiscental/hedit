@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE BlockArguments #-}
 
 module Lib
     ( start
@@ -10,7 +11,9 @@ where
 import           System.Environment
 import           System.Directory
 import           Control.Lens
+import           Control.Monad
 import           Data.List
+import qualified Data.Text                     as T
 import qualified Data.Map.Lazy                 as M
 import           Data.Maybe
 import           Graphics.Vty
@@ -40,7 +43,7 @@ strToImgs = map textToImg . stableLines
 stackImgs :: [Image] -> Image
 stackImgs = foldl (<->) emptyImage
 
--- EditState data type
+-- Types
 
 data EditableText = EditableText { beforeCursor :: String, afterCursor :: String }
 data EditMode = NormalMode | InsertMode | ExitMode deriving (Eq, Ord);
@@ -53,7 +56,16 @@ data EditState = EditState
   , viewOffset :: Int
   }
 
--- EditState constructors
+type MetaEdit = EditState -> EditState
+type SimpleEdit = EditableText -> EditableText
+
+type MetaBindings = M.Map Key MetaEdit
+type SimpleBindings = M.Map Key SimpleEdit
+type FallbackBinding = Key -> MetaEdit
+
+type BindingMap = M.Map EditMode (MetaBindings, FallbackBinding)
+
+-- Constructors / Initializers
 
 emptyText :: EditableText
 emptyText = EditableText { beforeCursor = "", afterCursor = "" }
@@ -68,7 +80,12 @@ emptyEditState = EditState { editText   = emptyText
 editString :: String -> EditableText
 editString str = EditableText { beforeCursor = "", afterCursor = str }
 
--- EditState properties
+-- Properties / Accessors
+
+shouldExit :: EditState -> Bool
+shouldExit editState = case editMode editState of
+    ExitMode -> True
+    _        -> False
 
 getText :: EditableText -> String
 getText EditableText { beforeCursor = b, afterCursor = a } = reverse b ++ a
@@ -118,7 +135,7 @@ renderText offset height editText =
         imgs        = strToImgs . stableUnlines $ renderLines
     in  stackImgs imgs
 
--- EditState mutations
+-- Edits / Transformations
 
 setEditText :: EditableText -> MetaEdit
 setEditText text EditState { editText = _, editMode = m, editFile = f, viewOffset = o }
@@ -227,14 +244,7 @@ applyEdit height edit state = updateOffset
               , viewOffset = viewOffset state
               }
 
-type MetaEdit = EditState -> EditState
-type SimpleEdit = EditableText -> EditableText
-
-type MetaBindings = M.Map Key MetaEdit
-type SimpleBindings = M.Map Key SimpleEdit
-type FallbackBinding = Key -> MetaEdit
-
-type BindingMap = M.Map EditMode (MetaBindings, FallbackBinding)
+-- Keybinds
 
 makeBindings :: Int -> MetaBindings -> SimpleBindings -> MetaBindings
 makeBindings height metaBindings editBindings =
@@ -320,11 +330,6 @@ start = do
     run vty editState
     shutdown vty
 
-shouldExit :: EditState -> Bool
-shouldExit editState = case editMode editState of
-    ExitMode -> True
-    _        -> False
-
 run :: Vty -> EditState -> IO ()
 run vty editState = do
     render vty editState
@@ -348,13 +353,28 @@ askInput vty msg input = do
         EvKey (KChar c) [] -> askInput vty msg (input ++ [c])
         _                  -> askInput vty msg input
 
+askYesNo :: Vty -> String -> IO Bool
+askYesNo vty msg = do
+    response <- askInput vty msg ""
+    let firstChar = T.head . T.toLower $ T.pack response
+    if firstChar == 'n'
+        then return False
+        else if firstChar == 'y'
+            then return True
+            else do
+                putStrLn "I don't know if that means yes or no..."
+                askYesNo vty msg
+
 closeFile :: Vty -> EditState -> IO ()
 closeFile vty editState = do
-    filename <-
-        askInput vty "Saving...\n\n  save file as:" $ case editFile editState of
-            ExistingFile str -> str
-            NewFile          -> ""
-    writeFile filename . getText . editText $ editState
+    shouldSave <- askYesNo vty "Do you want to save? [y/n]:"
+    when shouldSave $ do
+        filename <-
+            askInput vty "Saving...\n\n  save file as:"
+                $ case editFile editState of
+                      ExistingFile str -> str
+                      NewFile          -> ""
+        writeFile filename . getText . editText $ editState
 
 handleEvent :: Vty -> EditState -> IO EditState
 handleEvent vty editState = do
