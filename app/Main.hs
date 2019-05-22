@@ -1,6 +1,12 @@
 module Main where
 
-import Lib
+import           Lib
+import           Graphics.Vty
 
 main :: IO ()
-main = start
+main = do
+    cfg       <- standardIOConfig
+    vty       <- mkVty cfg
+    editState <- loadEditState
+    runEditor vty editState
+    shutdown vty

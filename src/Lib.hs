@@ -2,9 +2,8 @@
 {-# LANGUAGE BlockArguments #-}
 
 module Lib
-    ( start
-    , stableLines
-    , stableUnlines
+    ( loadEditState
+    , runEditor
     )
 where
 
@@ -319,22 +318,20 @@ loadFile filename = do
         . editString
         $ contents
 
-start :: IO ()
-start = do
-    cfg       <- standardIOConfig
-    vty       <- mkVty cfg
-    args      <- getArgs
-    editState <- case args ^? element 0 of
+loadEditState :: IO EditState
+loadEditState = do
+    args <- getArgs
+    case args ^? element 0 of
         Just name -> loadFile name
         Nothing   -> return emptyEditState
-    run vty editState
-    shutdown vty
 
-run :: Vty -> EditState -> IO ()
-run vty editState = do
+runEditor :: Vty -> EditState -> IO ()
+runEditor vty editState = do
     render vty editState
     editState <- handleEvent vty editState
-    if shouldExit editState then closeFile vty editState else run vty editState
+    if shouldExit editState
+        then closeFile vty editState
+        else runEditor vty editState
 
 askInput :: Vty -> String -> String -> IO String
 askInput vty msg input = do
