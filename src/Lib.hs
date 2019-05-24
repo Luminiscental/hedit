@@ -20,7 +20,12 @@ import           Graphics.Vty
 -- Pure utility functions
 
 stableLines :: String -> [String]
-stableLines = ((++) <$> init <*> (: []) . init . last) . lines . (++ "%")
+stableLines = actOnLast unmark . lines . markEnd
+  where
+    actOnLast f = (++) <$> init <*> makeList . f . last
+    makeList = (: [])
+    markEnd  = (++ "%")
+    unmark   = init
 
 stableUnlines :: [String] -> String
 stableUnlines = foldl1 (\acc line -> acc ++ '\n' : line)
@@ -29,9 +34,6 @@ stableUnlines = foldl1 (\acc line -> acc ++ '\n' : line)
 
 textAttr :: Attr
 textAttr = defAttr `withForeColor` blue `withBackColor` black
-
-cursorAttr :: Attr
-cursorAttr = defAttr `withForeColor` green `withBackColor` black
 
 textToImg :: String -> Image
 textToImg = string textAttr
@@ -82,12 +84,11 @@ editString str = EditableText { beforeCursor = "", afterCursor = str }
 -- Properties / Accessors
 
 shouldExit :: EditState -> Bool
-shouldExit editState = case editMode editState of
-    ExitMode -> True
-    _        -> False
+shouldExit EditState { editMode = ExitMode } = True
+shouldExit _ = False
 
 getText :: EditableText -> String
-getText EditableText { beforeCursor = b, afterCursor = a } = reverse b ++ a
+getText = (++) <$> reverse . beforeCursor <*> afterCursor
 
 row :: EditableText -> Int
 row = subtract 1 . length . stableLines . beforeCursor
@@ -107,22 +108,22 @@ showPos :: EditableText -> String
 showPos = combineToString <$> row <*> column
     where combineToString row col = show row ++ ":" ++ show col
 
+splitBefore :: EditableText -> ([String], String)
+splitBefore = splitAtLast . stableLines . reverse . beforeCursor
+    where splitAtLast = (,) <$> init <*> last
+
+splitAfter :: EditableText -> ([String], String)
+splitAfter = splitAtFirst . stableLines . afterCursor
+    where splitAtFirst = (,) <$> tail <*> head
+
 linesBefore :: EditableText -> [String]
-linesBefore = init . stableLines . reverse . beforeCursor
+linesBefore = fst . splitBefore
 
 linesAfter :: EditableText -> [String]
-linesAfter = tail . stableLines . afterCursor
+linesAfter = fst . splitAfter
 
 cursorLine :: EditableText -> String
-cursorLine =
-    (++)
-        <$> last
-        .   stableLines
-        .   reverse
-        .   beforeCursor
-        <*> head
-        .   stableLines
-        .   afterCursor
+cursorLine = (++) <$> snd . splitBefore <*> snd . splitAfter
 
 renderText :: Int -> Int -> EditableText -> Image
 renderText offset height editText =
@@ -137,28 +138,16 @@ renderText offset height editText =
 -- Edits / Transformations
 
 setEditText :: EditableText -> MetaEdit
-setEditText text EditState { editText = _, editMode = m, editFile = f, viewOffset = o }
-    = EditState { editText = text, editMode = m, editFile = f, viewOffset = o }
+setEditText text state = state { editText = text }
 
 setEditFile :: FilePath -> MetaEdit
-setEditFile path EditState { editText = t, editMode = m, editFile = _, viewOffset = o }
-    = EditState { editText   = t
-                , editMode   = m
-                , editFile   = ExistingFile path
-                , viewOffset = o
-                }
+setEditFile path state = state { editFile = ExistingFile path }
 
 setEditMode :: EditMode -> MetaEdit
-setEditMode mode EditState { editText = t, editMode = _, editFile = f, viewOffset = o }
-    = EditState { editText = t, editMode = mode, editFile = f, viewOffset = o }
+setEditMode mode state = state { editMode = mode }
 
 setViewOffset :: Int -> MetaEdit
-setViewOffset offset EditState { editText = t, editFile = f, editMode = m, viewOffset = _ }
-    = EditState { editText   = t
-                , editFile   = f
-                , editMode   = m
-                , viewOffset = offset
-                }
+setViewOffset offset state = state { viewOffset = offset }
 
 flipAroundCursor :: SimpleEdit
 flipAroundCursor EditableText { beforeCursor = bs, afterCursor = as } =
@@ -201,20 +190,19 @@ moveUp :: SimpleEdit
 moveUp = flipAroundRow . moveDown . flipAroundRow
 
 pushEdit :: Char -> SimpleEdit
-pushEdit c EditableText { beforeCursor = bs, afterCursor = as } =
-    EditableText { beforeCursor = c : bs, afterCursor = as }
+pushEdit c editText = editText { beforeCursor = c : beforeCursor editText }
 
 pushEdits :: String -> SimpleEdit
 pushEdits str editText = foldl (flip pushEdit) editText str
 
 popEdit :: SimpleEdit
-popEdit EditableText { beforeCursor = b : bs, afterCursor = as } =
-    EditableText { beforeCursor = bs, afterCursor = as }
-popEdit t = t
+popEdit editText = editText { beforeCursor = drop 1 $ beforeCursor editText }
+
+repeatApply :: (a -> a) -> Int -> (a -> a)
+repeatApply f n = foldr (.) id (replicate n f)
 
 popEdits :: Int -> SimpleEdit
-popEdits 0 = id
-popEdits n = popEdits (n - 1) . popEdit
+popEdits = repeatApply popEdit
 
 popLine :: SimpleEdit
 popLine editText =
@@ -235,13 +223,8 @@ updateOffset height editState = setViewOffset newOffset editState  where
 
 
 applyEdit :: Int -> SimpleEdit -> MetaEdit
-applyEdit height edit state = updateOffset
-    height
-    EditState { editText   = edit . editText $ state
-              , editMode   = editMode state
-              , editFile   = editFile state
-              , viewOffset = viewOffset state
-              }
+applyEdit height edit state =
+    updateOffset height state { editText = edit . editText $ state }
 
 -- Keybinds
 
@@ -313,8 +296,7 @@ loadFile filename = do
     contents   <- if fileExists then readFile filename else return ""
     return
         . setEditFile filename
-        . ($ emptyEditState)
-        . setEditText
+        . flip setEditText emptyEditState
         . editString
         $ contents
 
